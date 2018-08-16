@@ -21,6 +21,18 @@
 #define _BIT6 6
 #define _BIT7 7
 
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5705)
+#define CHGTYPE_NONE		0x00
+#define CHGTYPE_DCP		0x01
+#define CHGTYPE_CDP		0x02
+#define CHGTYPE_SDP		0x04
+#define CHGTYPE_TIMEOUT_SDP	0x08
+#define CHGTYPE_U200		0x10
+#define CHGTYPE_AFC		0x11
+#define CHGTYPE_LO_TA		0x12
+#define CHGTYPE_QC20		0x13
+#endif
+
 #define BITN(nr) (nr)
 
 #define INIT_NONE (-1)

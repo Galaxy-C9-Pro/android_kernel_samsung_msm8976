@@ -41,7 +41,7 @@ int dmv_check_failed;
 #define DM_VERITY_OPT_IGN_ZEROES	"ignore_zero_blocks"
 
 #define DM_VERITY_OPTS_MAX		(2 + DM_VERITY_OPTS_FEC)
-//#define SEC_HEX_DEBUG
+#define SEC_HEX_DEBUG
 
 #ifdef VERIFY_META_ONLY
 extern struct rb_root *ext4_system_zone_root(struct super_block *sb);
@@ -58,7 +58,28 @@ int start_meta;
 
 static unsigned dm_verity_prefetch_cluster = DM_VERITY_DEFAULT_PREFETCH_SIZE;
 
+#ifdef SEC_HEX_DEBUG
+static void print_block_data(unsigned long long blocknr, unsigned char *data_to_dump
+		, int start, int len);
+#endif
+
+
 module_param_named(prefetch_cluster, dm_verity_prefetch_cluster, uint, S_IRUGO | S_IWUSR);
+
+
+#ifdef DMV_ALTA
+/* Verity bitmap. Each bit represents one block and will be set when integrity
+ * on that block is verified.
+ *
+ * Entire bitmap has to be cleared when:
+ * - Target device is remounted.
+ * - Intruding syscalls are called for target device.
+ * - Sideband attack detected.
+ */
+#ifdef DMV_ALTA_PROF
+static sector_t total_blks = 0, skipped_blks = 0, prev_total_blks = 0;
+#endif
+#endif
 
 struct dm_verity_prefetch_work {
 	struct work_struct work;
@@ -312,6 +333,7 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 		else if (verity_handle_err(v,
 					   DM_VERITY_BLOCK_TYPE_METADATA,
 					   hash_block)) {
+	
 			r = -EIO;
 			goto release_ret_r;
 		}
@@ -548,6 +570,10 @@ static int verity_verify_io(struct dm_verity_io *io)
 					return -EIO;
 			}
 		}
+#ifdef DMV_ALTA
+		set_bit(io->block + b, (volatile unsigned long *)io->v->verity_bitmap);
+		continue;
+#endif
 	}
 	BUG_ON(vector != io->io_vec_size);
 	BUG_ON(offset);
@@ -571,7 +597,7 @@ static void verity_finish_io(struct dm_verity_io *io, int error)
 
 	verity_fec_finish_io(io, error);
 
-	bio_endio(bio, error);
+	bio_endio_nodec(bio, error);
 }
 
 static void verity_work(struct work_struct *w)
@@ -605,6 +631,7 @@ static void verity_prefetch_io(struct work_struct *work)
 		container_of(work, struct dm_verity_prefetch_work, work);
 	struct dm_verity *v = pw->v;
 	int i;
+	sector_t prefetch_size;
 
 	for (i = v->levels - 2; i >= 0; i--) {
 		sector_t hash_block_start;
@@ -627,8 +654,14 @@ static void verity_prefetch_io(struct work_struct *work)
 				hash_block_end = v->hash_blocks - 1;
 		}
 no_prefetch_cluster:
+		// for emmc, it is more efficient to send bigger read
+		prefetch_size = max((sector_t)CONFIG_DM_VERITY_HASH_PREFETCH_MIN_SIZE,
+			hash_block_end - hash_block_start + 1);
+		if ((hash_block_start + prefetch_size) >= (v->hash_start + v->hash_blocks)) {
+			prefetch_size = hash_block_end - hash_block_start + 1;
+		}
 		dm_bufio_prefetch(v->bufio, hash_block_start,
-				  hash_block_end - hash_block_start + 1);
+				  prefetch_size);
 	}
 
 	kfree(pw);
@@ -688,6 +721,18 @@ int verity_map(struct dm_target *ti, struct bio *bio)
 		start_meta = 1;
 	}
 #endif
+
+#ifdef DMV_ALTA
+    bool skip = true;
+    sector_t bitpos, nblks;
+#endif
+#ifdef VERIFY_META_ONLY
+	if (!start_meta && bio->bi_bdev->bd_super) {
+		system_blks = ext4_system_zone_root(bio->bi_bdev->bd_super);
+		DMERR_LIMIT("Successfully Get the system block information");
+		start_meta = 1;
+	}
+#endif
 	bio->bi_bdev = v->data_dev->bdev;
 	bio->bi_sector = verity_map_sector(v, bio->bi_sector);
 
@@ -710,6 +755,44 @@ int verity_map(struct dm_target *ti, struct bio *bio)
 	if (start_meta && !is_metablock(bio->bi_sector >> (v->data_dev_block_bits - SECTOR_SHIFT)))
 		goto skip_verity;
 #endif
+#ifdef DMV_ALTA
+    bitpos = bio->bi_sector >> (v->data_dev_block_bits - SECTOR_SHIFT);
+    nblks = bio->bi_size >> v->data_dev_block_bits;
+
+    while (nblks) {
+        if (!test_bit(bitpos, (const volatile unsigned long *)v->verity_bitmap)) {
+            skip = false;
+            break;
+        }
+        bitpos++;
+        nblks--;
+    }
+
+#ifdef DMV_ALTA_PROF
+    total_blks += (bio->bi_size >> v->data_dev_block_bits);
+    if ((total_blks - prev_total_blks) > 0x1000) {
+        prev_total_blks = total_blks;
+        DMERR_LIMIT("total_blks=%lu skipped_blks=%lu delta=%lu, device=%s", total_blks, skipped_blks, total_blks-skipped_blks, v->data_dev->name);
+    } 
+#endif
+
+    if (skip == true) {
+#ifdef DMV_ALTA_PROF
+        skipped_blks += (bio->bi_size >> v->data_dev_block_bits);
+#endif
+        goto skip_verity;
+    }
+#endif
+#ifdef VERITY_PERF
+	goto skip_verity;
+#endif
+
+#ifdef VERIFY_META_ONLY
+	if (start_meta && !is_metablock(bio->bi_sector >> (v->data_dev_block_bits - SECTOR_SHIFT)))
+		goto skip_verity;
+#endif		
+
+
 	io = dm_per_bio_data(bio, ti->per_bio_data_size);
 	io->v = v;
 	io->orig_bi_end_io = bio->bi_end_io;
@@ -730,6 +813,16 @@ int verity_map(struct dm_target *ti, struct bio *bio)
 	verity_fec_init_io(io);
 
 	verity_submit_prefetch(v, io);
+#ifdef DMV_ALTA
+skip_verity:
+#endif
+#ifdef VERITY_PERF
+skip_verity:
+#endif
+#ifdef VERIFY_META_ONLY
+skip_verity:
+#endif
+	
 #ifdef VERIFY_META_ONLY
 skip_verity:
 #endif
@@ -854,7 +947,11 @@ void verity_io_hints(struct dm_target *ti, struct queue_limits *limits)
 void verity_dtr(struct dm_target *ti)
 {
 	struct dm_verity *v = ti->private;
-
+#ifdef DMV_ALTA
+    if (v->verity_bitmap) {
+        kfree(v->verity_bitmap);
+    }
+#endif
 	if (v->verify_wq)
 		destroy_workqueue(v->verify_wq);
 
@@ -1229,6 +1326,15 @@ int verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 
 	ti->per_bio_data_size = roundup(ti->per_bio_data_size,
 					__alignof__(struct dm_verity_io));
+#ifdef DMV_ALTA
+    v->verity_bitmap = kmalloc(round_up(v->data_blocks, 8) >> 3, GFP_KERNEL);
+    if (v->verity_bitmap == NULL) {
+        ti->error = "Cannot allocate verity_bitmap";
+        r = -ENOMEM;
+        goto bad;
+    }
+    memset(v->verity_bitmap, 0, round_up(v->data_blocks, 8) >> 3);
+#endif
 
 	return 0;
 

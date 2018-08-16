@@ -1725,8 +1725,10 @@ static void __overlay_kickoff_requeue(struct msm_fb_data_type *mfd)
 {
 	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
 
+	MDSS_XLOG(0x1111);
 	mdss_mdp_display_commit(ctl, NULL, NULL);
 	mdss_mdp_display_wait4comp(ctl);
+	MDSS_XLOG(0x2222);
 
 	/* unstage any recovery pipes and re-queue used pipes */
 	mdss_mdp_mixer_unstage_all(ctl->mixer_left);
@@ -2145,6 +2147,7 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 		ATRACE_END("wb_kickoff");
 	} else {
 		ATRACE_BEGIN("display_commit");
+		MDSS_XLOG(need_cleanup);
 		if (!need_cleanup) {
 			commit_cb.commit_cb_fnc = mdss_mdp_commit_cb;
 			commit_cb.data = mfd;
@@ -4352,7 +4355,7 @@ static int __handle_overlay_prepare(struct msm_fb_data_type *mfd,
 	if (ret)
 		return ret;
 
-	if (mdss_fb_is_power_off(mfd) || mdss_fb_is_power_on_ulp(mfd)) {                          //case 02635595
+	if (mdss_fb_is_power_off(mfd)) {                         
 		mutex_unlock(&mdp5_data->ov_lock);
 		return -EPERM;
 	}

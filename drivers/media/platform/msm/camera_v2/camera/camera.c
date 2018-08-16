@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -277,7 +277,10 @@ static int camera_v4l2_streamon(struct file *filep, void *fh,
 	int rc;
 	struct camera_v4l2_private *sp = fh_to_private(fh);
 
+	mutex_lock(&sp->lock);
 	rc = vb2_streamon(&sp->vb2_q, buf_type);
+	mutex_unlock(&sp->lock);
+
 	camera_pack_event(filep, MSM_CAMERA_SET_PARM,
 		MSM_CAMERA_PRIV_STREAM_ON, -1, &event);
 
@@ -293,7 +296,7 @@ static int camera_v4l2_streamoff(struct file *filep, void *fh,
 		enum v4l2_buf_type buf_type)
 {
 	struct v4l2_event event;
-	int rc;
+	int rc = 0;
 	struct camera_v4l2_private *sp = fh_to_private(fh);
 
 	camera_pack_event(filep, MSM_CAMERA_SET_PARM,
@@ -304,7 +307,9 @@ static int camera_v4l2_streamoff(struct file *filep, void *fh,
 		return rc;
 
 	rc = camera_check_event_status(&event);
+	mutex_lock(&sp->lock);
 	vb2_streamoff(&sp->vb2_q, buf_type);
+	mutex_unlock(&sp->lock);
 	return rc;
 }
 
@@ -431,7 +436,9 @@ static int camera_v4l2_subscribe_event(struct v4l2_fh *fh,
 	int rc = 0;
 	struct camera_v4l2_private *sp = fh_to_private(fh);
 
+	mutex_lock(&sp->lock);
 	rc = v4l2_event_subscribe(&sp->fh, sub, 5, NULL);
+	mutex_unlock(&sp->lock);
 
 	return rc;
 }
@@ -442,7 +449,9 @@ static int camera_v4l2_unsubscribe_event(struct v4l2_fh *fh,
 	int rc = 0;
 	struct camera_v4l2_private *sp = fh_to_private(fh);
 
+	mutex_lock(&sp->lock);
 	rc = v4l2_event_unsubscribe(&sp->fh, sub);
+	mutex_unlock(&sp->lock);
 
 	return rc;
 }
@@ -508,13 +517,11 @@ static int camera_v4l2_fh_release(struct file *filep)
 	if (sp) {
 		v4l2_fh_del(&sp->fh);
 		v4l2_fh_exit(&sp->fh);
-		mutex_destroy(&sp->lock);
-		kzfree(sp);
-		return 0;
-	} else {
-		pr_err("File Pointer is NULL");
-		return -EBADF;
 	}
+
+	mutex_destroy(&sp->lock);
+	kzfree(sp);
+	return 0;
 }
 
 static int camera_v4l2_vb2_q_init(struct file *filep)
@@ -549,7 +556,9 @@ static void camera_v4l2_vb2_q_release(struct file *filep)
 	struct camera_v4l2_private *sp = filep->private_data;
 
 	kzfree(sp->vb2_q.drv_priv);
+	mutex_lock(&sp->lock);
 	vb2_queue_release(&sp->vb2_q);
+	mutex_unlock(&sp->lock);
 }
 
 static int camera_v4l2_open(struct file *filep)
@@ -625,7 +634,7 @@ static int camera_v4l2_open(struct file *filep)
 		if (rc < 0) {
 			pr_err("%s : creation of command_ack queue failed Line %d rc %d\n",
 					__func__, __LINE__, rc);
-			goto session_fail;
+			goto stream_fail;
 		}
 	}
 	idx |= (1 << find_first_zero_bit((const unsigned long *)&opn_idx,
@@ -640,6 +649,7 @@ command_ack_q_fail:
 	msm_destroy_session(pvdev->vdev->num);
 session_fail:
 	pm_relax(&pvdev->vdev->dev);
+stream_fail:
 	camera_v4l2_vb2_q_release(filep);
 vb2_q_fail:
 	camera_v4l2_fh_release(filep);

@@ -54,7 +54,7 @@ extern int check_water_state(void);
 extern void process_cc_attach(void * data, u8 *plug_attach_done);
 extern void process_cc_get_int_status(void *data, uint32_t *pPRT_MSG, MSG_IRQ_STATUS_Type *MSG_IRQ_State);
 extern void process_cc_rid(void * data);
-extern void ccic_event_work(void *data, int dest, int id, int attach, int event);
+extern void ccic_event_work(void *data, int dest, int id, int sub1, int sub2, int sub3);
 extern void process_cc_water_det(void * data);
 #if defined(CONFIG_DUAL_ROLE_USB_INTF)
 extern void role_swap_check(struct work_struct *work);

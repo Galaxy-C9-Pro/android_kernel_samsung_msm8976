@@ -112,6 +112,7 @@ static int check_event_type(enum otg_notify_events event)
 	case NOTIFY_EVENT_MMD_EXT_CURRENT:
 	case NOTIFY_EVENT_DEVICE_CONNECT:
 	case NOTIFY_EVENT_GAMEPAD_CONNECT:
+	case NOTIFY_EVENT_LANHUB_CONNECT:
 		ret |= NOTIFY_EVENT_EXTRA;
 		break;
 	case NOTIFY_EVENT_VBUS:
@@ -204,6 +205,8 @@ const char *event_string_ex(enum otg_notify_events event)
 		return "device_connect";
 	case NOTIFY_EVENT_GAMEPAD_CONNECT:
 		return "gamepad_connect";
+	case NOTIFY_EVENT_LANHUB_CONNECT:
+		return "lanhub_connect";
 	default:
 		return "undefined";
 	}
@@ -918,6 +921,12 @@ static void extra_notify_state(struct otg_notify *n,
 			send_external_notify(EXTERNAL_NOTIFY_DEVICE_CONNECT,
 					EXTERNAL_NOTIFY_GPAD);
 		break;
+	case NOTIFY_EVENT_LANHUB_CONNECT:
+		if (u_notify->c_type == NOTIFY_EVENT_HOST ||
+			u_notify->c_type == NOTIFY_EVENT_LANHUB)
+			send_external_notify(EXTERNAL_NOTIFY_DEVICE_CONNECT,
+					EXTERNAL_NOTIFY_LANHUB);
+		break;
 	default:
 		break;
 	}
@@ -1492,6 +1501,8 @@ int set_otg_notify(struct otg_notify *n)
 				  device_connect_check);
 
 	register_usbdev_notify();
+
+	register_usblog_proc();
 
 	pr_info("registered otg_notify -\n");
 	return 0;

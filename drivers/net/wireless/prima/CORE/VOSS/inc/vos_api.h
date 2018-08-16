@@ -510,5 +510,5 @@ void vos_updatePktStatsInfo(void * pktStat);
 bool vos_is_wlan_logging_enabled(void);
 
 v_BOOL_t vos_is_probe_rsp_offload_enabled(void);
-
+void vos_set_snoc_high_freq_voting(bool enable);
 #endif // if !defined __VOS_NVITEM_H

@@ -485,6 +485,8 @@ void muic_detect_dev(muic_data_t *pmuic)
 	} else {
 		muic_handle_detach(pmuic);
 	}
+
+check_vb:
 #if defined(CONFIG_VBUS_NOTIFIER)
 	pr_info("vbus_check %d \n",pmuic->vps.s.vbvolt);
 	if (new_dev == ATTACHED_DEV_UNIVERSAL_MMDOCK_MUIC && !pmuic->vps.s.vbvolt)

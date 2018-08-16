@@ -29,6 +29,10 @@
 #include "muic-internal.h"
 #include "muic_regmap.h"
 #include "muic_i2c.h"
+#include <linux/ccic/s2mm005.h>
+#include "muic_apis.h"
+#include "../../battery_v2/include/sec_charging_common.h"
+
 #if defined(CONFIG_MUIC_NOTIFIER)
 #include <linux/muic/muic_notifier.h>
 #endif /* CONFIG_MUIC_NOTIFIER */
@@ -52,7 +56,7 @@ muic_data_t *gpmuic;
 static int afc_work_state;
 
 static int muic_is_afc_voltage(void);
-static int muic_dpreset_afc(void);
+int muic_dpreset_afc(void);
 
 /* To make AFC work properly on boot */
 static int is_charger_ready;
@@ -62,14 +66,30 @@ void muic_afc_delay_check_state(int state);
 
 int muic_check_afc_state(int state)
 {
-	struct afc_ops *afcops = gpmuic->regmapdesc->afcops;
+	struct muic_platform_data *pdata = gpmuic->pdata;
+	struct afc_ops *afcops;
 	int ret, retry;
+
+#ifdef CONFIG_MUIC_UNIVERSAL_MULTI_SUPPORT
+	if (gpmuic == NULL)
+		return 1;
+#endif
+	afcops = gpmuic->regmapdesc->afcops;
 
 	mutex_lock(&gpmuic->lock);
 	pr_info("%s start. state = %d\n", __func__, state);
 
+	if (pdata->afc_limit_voltage) {
+		pr_info("%s: afc_limit_voltage is enabled, force to return\n",
+				__func__);
+		goto Out;
+	}
 	if (gpmuic->is_flash_on == state) {
 		pr_info("%s AFC state is already %d, skip\n", __func__, state);
+		goto Out;
+	}
+	if (gpmuic->afc_disable == 1) { /* AFC OFF */
+		pr_info("AFC Disabled in a setting\n");
 		goto Out;
 	}
 
@@ -104,18 +124,13 @@ int muic_check_afc_state(int state)
 			goto Out;
 		}
 	} else {
-		if (gpmuic->afc_disable != 1) {
-			/* Flash off state */
-			if ((gpmuic->attached_dev == ATTACHED_DEV_AFC_CHARGER_5V_MUIC) ||
-					((gpmuic->is_afc_device) &&
-					(gpmuic->attached_dev != ATTACHED_DEV_AFC_CHARGER_9V_MUIC) &&
-					(gpmuic->attached_dev != ATTACHED_DEV_AFC_CHARGER_9V_18W_MUIC) &&
-					(gpmuic->attached_dev != ATTACHED_DEV_QC_CHARGER_9V_MUIC)))
-				muic_restart_afc();
-		} else {
-			pr_info("%s:AFC is disabled in setting. Skip to enable.\n",__func__);		
-		}
-		
+		/* Flash off state */
+		if ((gpmuic->attached_dev == ATTACHED_DEV_AFC_CHARGER_5V_MUIC) ||
+				((gpmuic->is_afc_device) &&
+				(gpmuic->attached_dev != ATTACHED_DEV_AFC_CHARGER_9V_MUIC) &&
+				(gpmuic->attached_dev != ATTACHED_DEV_AFC_CHARGER_9V_18W_MUIC) &&
+				(gpmuic->attached_dev != ATTACHED_DEV_QC_CHARGER_9V_MUIC)))
+			muic_restart_afc();
 		gpmuic->is_flash_on = 0;
 		goto Out;
 	}
@@ -134,11 +149,17 @@ EXPORT_SYMBOL(muic_check_afc_state);
 int muic_torch_prepare(int state)
 {
 	struct afc_ops *afcops = gpmuic->regmapdesc->afcops;
+	struct muic_platform_data *pdata = gpmuic->pdata;
 	int ret, retry;
 
 	mutex_lock(&gpmuic->lock);
 	pr_info("%s start. state = %d\n", __func__, state);
 
+	if (pdata->afc_limit_voltage) {
+		pr_info("%s: afc_limit_voltage is enabled, force to return\n",
+				__func__);
+		goto Out;
+	}
 	if (gpmuic->is_flash_on == state) {
 		pr_info("%s AFC state is already %d, skip\n", __func__, state);
 		goto Out;
@@ -225,7 +246,7 @@ static int muic_is_afc_voltage(void)
 		return 1;
 }
 
-static int muic_dpreset_afc(void)
+int muic_dpreset_afc(void)
 {
 	struct afc_ops *afcops = gpmuic->regmapdesc->afcops;
 
@@ -473,6 +494,47 @@ void muic_charger_init(void)
 		schedule_work(&muic_afc_init_work);
 }
 
+int muic_afc_set_voltage(int voltage)
+{
+	struct muic_platform_data *pdata = gpmuic->pdata;
+	if(!pdata) {
+		pr_err("%s:%s cannot read pmuic!\n", MUIC_DEV_NAME, __func__);
+		return 0;
+	}
+
+	pr_info("%s: %s: voltage(%d)\n", MUIC_DEV_NAME, __func__, voltage);
+
+	switch (voltage)
+	{
+	case 0:
+		pr_info("%s:%s Working Tusb W/A\n", MUIC_DEV_NAME, __func__);
+		pdata->afc_limit_voltage = true;
+		gpmuic->attached_dev = ATTACHED_DEV_NONE_MUIC;
+		muic_notifier_detach_attached_dev(gpmuic->attached_dev);
+		muic_dpreset_afc();
+		msleep(500);
+		gpmuic->attached_dev = ATTACHED_DEV_TA_MUIC;
+		muic_notifier_attach_attached_dev(gpmuic->attached_dev);
+		break;
+	case 5:
+		pdata->afc_limit_voltage = true;
+		muic_dpreset_afc();
+		break;
+	case 9:
+	case 12:
+		pdata->afc_limit_voltage = false;
+		if (gpmuic->ccic_rp == Rp_56K) {
+			muic_restart_afc();
+		}
+		break;
+	default:
+		pr_warn("%s:%s invalid value\n", MUIC_DEV_NAME, __func__);
+		return 0;
+	}
+
+	return 1;
+}
+
 #ifdef CONFIG_MUIC_SM5705_AFC_18W_TA_SUPPORT
 
 // voltage
@@ -667,7 +729,7 @@ static ssize_t afc_disable_store(struct device *dev,
 		const char *buf, size_t size)
 {
 	muic_data_t *pmuic = dev_get_drvdata(dev);
-	struct muic_platform_data *pdata = pmuic->pdata;
+	//struct muic_platform_data *pdata = pmuic->pdata;
 	unsigned int param_val;
 	int ret = 0;
 
@@ -692,7 +754,7 @@ static ssize_t afc_disable_store(struct device *dev,
 		return ret;
 	}else{
 		pr_info("%s:%s afc_disable:%d (AFC %s)\n", MUIC_DEV_NAME, __func__,
-			pdata->afc_disable, pdata->afc_disable ? "Disabled": "Enabled");
+			pmuic->afc_disable, pmuic->afc_disable ? "Disabled": "Enabled");
 	}
 
 	return size;

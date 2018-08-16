@@ -3915,6 +3915,7 @@ int mdss_mdp_secure_display_ctrl(unsigned int enable)
 static inline int mdss_mdp_suspend_sub(struct mdss_data_type *mdata)
 {
 	mdata->suspend_fs_ena = mdata->fs_ena;
+	MDSS_XLOG(mdata->fs_ena, false);
 	mdss_mdp_footswitch_ctrl(mdata, false);
 
 	pr_debug("suspend done fs=%d\n", mdata->suspend_fs_ena);
@@ -3924,6 +3925,7 @@ static inline int mdss_mdp_suspend_sub(struct mdss_data_type *mdata)
 
 static inline int mdss_mdp_resume_sub(struct mdss_data_type *mdata)
 {
+	MDSS_XLOG(mdata->fs_ena, true);
 	if (mdata->suspend_fs_ena)
 		mdss_mdp_footswitch_ctrl(mdata, true);
 
@@ -4012,6 +4014,7 @@ static int mdss_mdp_runtime_resume(struct device *dev)
 	/* do not resume panels when coming out of idle power collapse */
 	if (!mdata->idle_pc)
 		device_for_each_child(dev, &device_on, mdss_fb_suspres_panel);
+	MDSS_XLOG(true);
 	mdss_mdp_footswitch_ctrl(mdata, true);
 
 	return 0;
@@ -4085,6 +4088,7 @@ static int mdss_mdp_runtime_suspend(struct device *dev)
 		return -EBUSY;
 	}
 
+	MDSS_XLOG(false);
 	mdss_mdp_footswitch_ctrl(mdata, false);
 	/* do not suspend panels when going in to idle power collapse */
 	if (!mdata->idle_pc)

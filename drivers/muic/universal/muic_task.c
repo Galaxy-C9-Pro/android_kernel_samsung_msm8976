@@ -28,6 +28,7 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/host_notify.h>
+#include <linux/ccic/s2mm005.h>
 
 #include <linux/muic/muic.h>
 #include <linux/muic/muic_afc.h>
@@ -137,9 +138,10 @@ static int muic_irq_handler_afc(muic_data_t *pmuic, int irq)
 		intr1 |= intr_tmp;
 	}
 
-	if (intr1 & MUIC_INT_DETACH_MASK) { 
+	if (intr1 & MUIC_INT_DETACH_MASK) {
 		cancel_delayed_work(&pmuic->afc_retry_work);
 		cancel_delayed_work(&pmuic->afc_restart_work);
+		pmuic->pdata->afc_limit_voltage = false;
 		muic_afc_delay_check_state(0);
 	}
 
@@ -214,67 +216,90 @@ static int muic_irq_handler_afc(muic_data_t *pmuic, int irq)
 	if ((intr1 & MUIC_INT_DETACH_MASK) && (intr2 & MUIC_INT_VBUS_OFF_MASK))
 		return INT_REQ_DONE;
 
-	if(pmuic->afc_disable == 0){
-		if (intr3 & INT3_AFC_TA_ATTACHED_MASK) {  /*AFC_TA_ATTACHED*/
-#if defined(CONFIG_MUIC_SUPPORT_CCIC) && !defined(CONFIG_SEC_FACTORY)		
-			/* To prevent damage by RP0 Cable, AFC should be progress after ccic_attach */
-			if (pmuic->is_ccic_attach) {
-				ret = afcops->afc_ta_attach(pmuic->regmapdesc);
-				if (intr1 & MUIC_INT_DETACH_MASK) {
-					return INT_REQ_DONE;
-				} else {
-					return ret;
-				}
-			} else {
-				pmuic->retry_afc = true;
-				pr_info("%s: Need AFC restart for late ccic_attach\n", __func__);
-			}
-#else
-			ret = afcops->afc_ta_attach(pmuic->regmapdesc);
-			if (intr1 & MUIC_INT_DETACH_MASK) {
-				return INT_REQ_DONE;
-			} else {
-				return ret;
-			}
-#endif			
-		} else if (intr3 & INT3_AFC_ACCEPTED_MASK) {  /*AFC_ACCEPTED*/
-			ret = afcops->afc_ta_accept(pmuic->regmapdesc);
-			if (intr1 & MUIC_INT_DETACH_MASK) {
-				return INT_REQ_DONE;
-			} else {
-				return ret;
-			}
-		} else if (intr3 & INT3_AFC_VBUS_UPDATE_MASK) {  /*AFC_VBUS_UPDATE*/
-			ret = afcops->afc_vbus_update(pmuic->regmapdesc);
-			if (intr1 & MUIC_INT_DETACH_MASK) {
-				return INT_REQ_DONE;
-			} else {
-				return ret;
-			}
-		} else if (intr3 & INT3_AFC_MULTI_BYTE_MASK) {  /*AFC_MULTI_BYTE*/
-			ret = afcops->afc_multi_byte(pmuic->regmapdesc);
-			if (intr1 & MUIC_INT_DETACH_MASK) {
-				return INT_REQ_DONE;
-			} else {
-				return ret;
-			}
-		} else if (intr3 & INT3_AFC_ERROR_MASK) {  /*AFC_ERROR*/
-			cancel_delayed_work(&pmuic->afc_retry_work);
-			ret = afcops->afc_error(pmuic->regmapdesc);
-			if (intr1 & MUIC_INT_DETACH_MASK) {
-				return INT_REQ_DONE;
-			} else {
-				return ret;
-			}
-		} else if (intr3 & INT3_AFC_STA_CHG_MASK) {  /*AFC_STA_CHG*/
-			if (intr1 & MUIC_INT_DETACH_MASK) {
-				return INT_REQ_DONE;
-			} else {
-				return 0;
-			}
+	if (pmuic->pdata->afc_limit_voltage) {
+		pr_err("%s: AFC voltage is limited. Discard the interrupt\n",
+				__func__);
+
+		switch (intr3) {
+			case INT3_AFC_ERROR_MASK:
+			case INT3_AFC_STA_CHG_MASK:
+			case INT3_AFC_MULTI_BYTE_MASK:
+			case INT3_AFC_VBUS_UPDATE_MASK:
+			case INT3_AFC_ACCEPTED_MASK:
+			case INT3_AFC_TA_ATTACHED_MASK:
+				return INT_REQ_DISCARD;
+			default:
+				break;
 		}
-	}else{
-		pr_err("%s: Ignore AFC_INTS, AFC is disabled \n", __func__);
+	}
+
+	if (pmuic->afc_disable) {
+		pr_err("%s: Ignore AFC INTS, AFC is disabled by setting\n", __func__);
+		return INT_REQ_DONE;
+	}
+
+	if (intr3 & INT3_AFC_TA_ATTACHED_MASK) {  /*AFC_TA_ATTACHED*/
+#if defined(CONFIG_MUIC_SUPPORT_CCIC) && !defined(CONFIG_SEC_FACTORY)
+		/* To prevent damage by RP0 Cable, AFC should be progress after ccic_attach */
+		if (pmuic->is_ccic_attach) {
+ 			if (pmuic->ccic_rp == Rp_56K)
+				afcops->afc_ta_attach(pmuic->regmapdesc);
+			else {
+				pmuic->retry_afc = true;
+				pr_info("%s: Rp isn't 56K, but is (%d)K\n", __func__, pmuic->ccic_rp);
+				pmuic->attached_dev = ATTACHED_DEV_AFC_CHARGER_5V_MUIC;
+				muic_notifier_attach_attached_dev(pmuic->attached_dev);
+			}
+
+			if (intr1 & MUIC_INT_DETACH_MASK)
+				return INT_REQ_DONE;
+			return ret;
+
+		} else {
+			pmuic->retry_afc = true;
+			pr_info("%s: Need AFC restart for late ccic_attach\n", __func__);
+		}
+#else
+		ret = afcops->afc_ta_attach(pmuic->regmapdesc);
+		if (intr1 & MUIC_INT_DETACH_MASK)
+			return INT_REQ_DONE;
+		return ret;
+#endif
+	} else if (intr3 & INT3_AFC_ACCEPTED_MASK) {  /*AFC_ACCEPTED*/
+		ret = afcops->afc_ta_accept(pmuic->regmapdesc);
+		if (intr1 & MUIC_INT_DETACH_MASK) {
+			return INT_REQ_DONE;
+		} else {
+			return ret;
+		}
+	} else if (intr3 & INT3_AFC_VBUS_UPDATE_MASK) {  /*AFC_VBUS_UPDATE*/
+		ret = afcops->afc_vbus_update(pmuic->regmapdesc);
+		if (intr1 & MUIC_INT_DETACH_MASK) {
+			return INT_REQ_DONE;
+		} else {
+			return ret;
+		}
+	} else if (intr3 & INT3_AFC_MULTI_BYTE_MASK) {  /*AFC_MULTI_BYTE*/
+		ret = afcops->afc_multi_byte(pmuic->regmapdesc);
+		if (intr1 & MUIC_INT_DETACH_MASK) {
+			return INT_REQ_DONE;
+		} else {
+			return ret;
+		}
+	} else if (intr3 & INT3_AFC_ERROR_MASK) {  /*AFC_ERROR*/
+		cancel_delayed_work(&pmuic->afc_retry_work);
+		ret = afcops->afc_error(pmuic->regmapdesc);
+		if (intr1 & MUIC_INT_DETACH_MASK) {
+			return INT_REQ_DONE;
+		} else {
+			return ret;
+		}
+	} else if (intr3 & INT3_AFC_STA_CHG_MASK) {  /*AFC_STA_CHG*/
+		if (intr1 & MUIC_INT_DETACH_MASK) {
+			return INT_REQ_DONE;
+		} else {
+			return 0;
+		}
 	}
 
 	return INT_REQ_DONE;
@@ -580,6 +605,7 @@ static int muic_probe(struct i2c_client *i2c,
 	}
 #endif
 
+	pmuic->pdata->afc_limit_voltage = false;
 	/* Register chipset register map. */
 	muic_register_regmap(&pdesc, pmuic);
 	pdesc->muic = pmuic;
@@ -630,7 +656,7 @@ static int muic_probe(struct i2c_client *i2c,
 #endif
 	/* initial cable detection */
 	INIT_DELAYED_WORK(&pmuic->init_work, muic_init_detect);
-	schedule_delayed_work(&pmuic->init_work, msecs_to_jiffies(300));
+	schedule_delayed_work(&pmuic->init_work, msecs_to_jiffies(1000));
 #ifdef DEBUG_MUIC
 	INIT_DELAYED_WORK(&pmuic->usb_work, muic_show_debug_info);
 	schedule_delayed_work(&pmuic->usb_work, msecs_to_jiffies(10000));

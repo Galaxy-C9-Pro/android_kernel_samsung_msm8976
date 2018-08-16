@@ -13,9 +13,8 @@
 
 #include <linux/notifier.h>
 #include <linux/host_notify.h>
-#include <linux/notifier.h>
 #include <linux/external_notify.h>
-
+#include <linux/usblog_proc_notify.h>
 
 enum otg_notify_events {
 	NOTIFY_EVENT_NONE,

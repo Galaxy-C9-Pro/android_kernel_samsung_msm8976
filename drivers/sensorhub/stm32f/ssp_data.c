@@ -107,7 +107,7 @@ void refresh_task(struct work_struct *work)
 	data->cnt_reset++;
 	if (initialize_mcu(data) > 0) {
 		sync_sensor_state(data);
-		ssp_sensorhub_report_notice(data, MSG2SSP_AP_STATUS_RESET);
+		report_scontext_notice_data(data, MSG2SSP_AP_STATUS_RESET);
 		if (data->uLastAPState != 0)
 			ssp_send_cmd(data, data->uLastAPState, 0);
 		if (data->uLastResumeState != 0)
@@ -188,8 +188,7 @@ int parse_dataframe(struct ssp_data *data, char *dataframe, int frame_len)
 		case MSG2AP_INST_LIBRARY_DATA:
 			memcpy(&length, dataframe + index, 2);
 			index += 2;
-			ssp_sensorhub_handle_data(data, dataframe, index,
-					index + length);
+			report_scontext_data(data, dataframe + index, length);
 			index += length;
 			break;
 		case MSG2AP_INST_BIG_DATA:
@@ -198,7 +197,7 @@ int parse_dataframe(struct ssp_data *data, char *dataframe, int frame_len)
 		case MSG2AP_INST_META_DATA:
 			event.meta_data.what = dataframe[index++];
 			event.meta_data.sensor = dataframe[index++];
-			report_meta_data(data, SENSOR_TYPE_META, &event);
+			report_meta_data(data, &event);
 			break;
 		case MSG2AP_INST_TIME_SYNC:
 			data->is_time_syncing = true;
@@ -234,5 +233,4 @@ int parse_dataframe(struct ssp_data *data, char *dataframe, int frame_len)
 void initialize_function_pointer(struct ssp_data *data)
 {
 	data->ssp_big_task[BIG_TYPE_DUMP] = ssp_dump_task;
-	data->ssp_big_task[BIG_TYPE_READ_LIB] = ssp_read_big_library_task;
 }

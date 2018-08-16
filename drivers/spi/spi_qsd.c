@@ -3164,6 +3164,14 @@ skip_dma_resources:
 		dev_err(&pdev->dev, "failed to create dev. attrs : %d\n", rc);
 		goto err_attrs;
 	}
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (pdev->id == CONFIG_SENSORS_FP_SPI_NUMBER)
+		return 0;
+#endif
+#ifdef CONFIG_ESE_SECURE
+	if (pdev->id == CONFIG_ESE_SECURE_SPI_PORT)
+		return 0;
+#endif
 	spi_debugfs_init(dd);
 
 	return 0;

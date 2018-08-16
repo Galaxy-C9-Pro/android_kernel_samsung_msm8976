@@ -194,7 +194,8 @@ struct muic_platform_data {
 	int gpio_uart_sel;
 
 	bool rustproof_on;
-	bool afc_disable;
+	//bool afc_disable;
+	bool afc_limit_voltage;
 	
 #if defined(CONFIG_MUIC_UART_SWITCH)
 	/* for the modAP */

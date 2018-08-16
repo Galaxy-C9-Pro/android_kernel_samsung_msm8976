@@ -435,8 +435,10 @@ static ssize_t outdoor_store(struct device *dev,
 
 	sscanf(buf, "%d", &value);
 
-	if (value < OUTDOOR_OFF_MODE || value >= MAX_OUTDOOR_MODE)
+	if (value < OUTDOOR_OFF_MODE || value >= MAX_OUTDOOR_MODE) {
 		DPRINT("[ERROR] : wrong outdoor mode value : %d\n", value);
+		return size;
+	}
 
 	list_for_each_entry_reverse(mdnie_tune_state, &mdnie_list , used_list) {
 		if (!vdd)

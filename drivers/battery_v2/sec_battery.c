@@ -4145,6 +4145,12 @@ static void sec_bat_cable_work(struct work_struct *work)
 		battery->cable_type == POWER_SUPPLY_TYPE_UNKNOWN)) {
 		battery->charging_mode = SEC_BATTERY_CHARGING_NONE;
 		battery->is_recharging = false;
+#if defined(CONFIG_CHANGE_VBUS_VOLTAGE)
+		if(battery->vbus_chg_by_siop){
+			battery->vbus_chg_by_siop = false;
+			muic_check_afc_state(0);
+		}
+#endif
 		battery->input_voltage = 0;
 		battery->charge_power = 0;
 		battery->max_charge_power = 0;
@@ -4191,7 +4197,7 @@ static void sec_bat_cable_work(struct work_struct *work)
 			battery->charging_mode = SEC_BATTERY_CHARGING_NONE;
 			battery->status = POWER_SUPPLY_STATUS_DISCHARGING;
 		} else {
-			if (!keep_charging_state) {
+			if (!keep_charging_state && battery->status != POWER_SUPPLY_STATUS_NOT_CHARGING) {
 				if (battery->pdata->full_check_type !=
 						SEC_BATTERY_FULLCHARGED_NONE)
 					battery->charging_mode =
@@ -4206,7 +4212,7 @@ static void sec_bat_cable_work(struct work_struct *work)
 			if (battery->status == POWER_SUPPLY_STATUS_FULL)
 				sec_bat_set_charging_status(battery,
 						POWER_SUPPLY_STATUS_FULL);
-			else if (!keep_charging_state)
+			else if (!keep_charging_state && battery->status != POWER_SUPPLY_STATUS_NOT_CHARGING)
 				sec_bat_set_charging_status(battery,
 						POWER_SUPPLY_STATUS_CHARGING);
 		}
@@ -4223,7 +4229,7 @@ static void sec_bat_cable_work(struct work_struct *work)
 			battery->cable_type == POWER_SUPPLY_TYPE_POWER_SHARING) {
 			if (sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING_OFF))
 				goto end_of_cable_work;
-		} else if (!keep_charging_state) {
+		} else if (!keep_charging_state && battery->status != POWER_SUPPLY_STATUS_NOT_CHARGING) {
 			if (sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING))
 				goto end_of_cable_work;
 		}

@@ -115,6 +115,10 @@
 #define MSG2SSP_AP_PROX_GET_TRIM		0x40
 #define MSG2SSP_AP_SET_6AXIS_PIN		0x7D
 #define MSG2SSP_AP_WHOAMI_6AXIS			0x7F
+#define MSG2SSP_AP_SET_LIGHT_COEF		0x49
+#define MSG2SSP_AP_REGISTER_DUMP		0x4A
+#define MSG2SSP_AP_REGISTER_SETTING		0x4B
+#define MSG2SSP_AP_GET_LIGHT_COEF		0x50
 
 /* gyro calibration state*/
 #define SH_MSG2AP_GYRO_CALIBRATION_START   0x43
@@ -253,17 +257,19 @@ enum {
 #define SENSOR_TYPE_GLANCE_GESTURE                  (24)
 #define SENSOR_TYPE_PICK_UP_GESTURE                 (25)
 #define SENSOR_TYPE_WRIST_TILT_GESTURE              (26)
-#define SENSOR_TYPE_META                            (27)
+#define SENSOR_TYPE_ANDROID_MAX                     (27)
 
 /* Sensor types defined by Samsung */
-#define SENSOR_TYPE_DEVICE_PRIVATE_BASE             (SENSOR_TYPE_META)
+#define SENSOR_TYPE_DEVICE_PRIVATE_BASE             (SENSOR_TYPE_ANDROID_MAX)
 #define SENSOR_TYPE_ACCELEROMETER_INT               (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 1)
 #define SENSOR_TYPE_PROXIMITY_RAW                   (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 2)
 #define SENSOR_TYPE_GEOMAGNETIC_POWER               (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 3)
 #define SENSOR_TYPE_INTERRUPT_GYRO                  (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 4)
-#define SENSOR_TYPE_MAX                             (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 5)
-#define SENSOR_CONTROL_BASE                         (100)
-#define SENSOR_TYPE_MOBEAM                          (SENSOR_CONTROL_BASE + 1)
+#define SENSOR_TYPE_SCONTEXT                        (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 5)
+#define SENSOR_TYPE_MOBEAM	                    (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 6)				
+#define SENSOR_TYPE_LIGHT_CCT                       (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 7)
+#define SENSOR_TYPE_MAX                             (SENSOR_TYPE_DEVICE_PRIVATE_BASE + 8)
+
 
 enum {
 	AP2HUB_READ = 0,
@@ -275,7 +281,6 @@ enum {
 
 enum {
 	BIG_TYPE_DUMP = 0,
-	BIG_TYPE_READ_LIB,
 	BIG_TYPE_MAX,
 };
 
@@ -427,6 +432,7 @@ struct ssp_data {
 	struct delayed_work work_refresh;
 	struct miscdevice shtc1_device;
 	struct miscdevice batch_io_device;
+	struct miscdevice scontext_device;
 
 	struct hw_offset_data magoffset;
 
@@ -509,7 +515,12 @@ struct ssp_data {
 	int gyro_lib_state;
 	int first_gyro_cal;
 	int light_log_cnt;
-	
+	int light_coef[7];
+
+	/* variable for sensor register dump*/
+#ifdef CONFIG_SSP_REGISTER_RW
+	char registerValue[5];
+#endif
 	bool debug_enable;
 	char sensor_state[BIG_DATA_SENSOR_TYPE_MAX+1];
 };

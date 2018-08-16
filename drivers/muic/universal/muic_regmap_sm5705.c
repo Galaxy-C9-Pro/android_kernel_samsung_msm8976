@@ -29,7 +29,9 @@
 #include <linux/delay.h>
 #include <linux/host_notify.h>
 #include <linux/string.h>
+#include <linux/power_supply.h>
 
+#include <linux/ccic/s2mm005.h>
 #include <linux/muic/muic.h>
 #include <linux/muic/muic_afc.h>
 
@@ -45,6 +47,7 @@
 #include "muic-internal.h"
 #include "muic_i2c.h"
 #include "muic_regmap.h"
+#include "../../battery_v2/include/sec_charging_common.h"
 
 #if defined(CONFIG_MUIC_UNIVERSAL_SM5705_AFC)
 extern void muic_afc_delay_check_state(int state);
@@ -665,6 +668,17 @@ static int sm5705_get_vbus_value(struct regmap_desc *pdesc)
 	int ret;
 	int attr, value;
 	int i, retry_cnt = 20;
+/*
+ WORKAROUND :  forbid vbus read during AFC protocol hand-shaking
+ when testing with Battery_status APK, this apk will read vbus through  following operations  
+ these operations may cause AFC recognition fail  if AFC hand-shanking is started but  not finished yet
+ that casue  conflict and impact on  AFC_VBUS_UPDATE ,  so AFC_VBUS_UPDATE interrupt  will never trigger  
+*/
+	if (muic->attached_dev == ATTACHED_DEV_AFC_CHARGER_PREPARE_MUIC){
+		
+		pr_info("%s: AFC protocol hand-shaking , so skip vbus read:%d\n", __func__, val);
+		return -EINVAL;
+	}
 
 	/* write '1' to INT3_VBUS_UPDATE_M: masking */
 	attr = INT3_VBUS_UPDATE_M;
@@ -903,8 +917,8 @@ static int sm5705_afc_ta_attach(struct regmap_desc *pdesc)
         pr_info("%s:%s AFC_TXD read [0x%02x]\n",MUIC_DEV_NAME, __func__, value);
     }
 #else
-	// voltage(9.0V) + current(1.65A) setting : 0x
-	value = 0x48;
+	// voltage(9.0V) + current(1.65A) setting : 0x46
+	value = 0x46;
 #endif
 	ret = muic_i2c_write_byte(i2c, REG_AFCTXD, value);
 	if (ret < 0)
@@ -947,7 +961,7 @@ static int sm5705_afc_ta_accept(struct regmap_desc *pdesc)
 
 		pmuic->attached_dev = ATTACHED_DEV_AFC_CHARGER_5V_MUIC;
 		muic_notifier_attach_attached_dev(ATTACHED_DEV_AFC_CHARGER_5V_MUIC);
-		return 0;        
+		return 0;
 	}
 
 	cancel_delayed_work(&pmuic->afc_retry_work);
@@ -1044,7 +1058,12 @@ static int sm5705_afc_vbus_update(struct regmap_desc *pdesc)
 	if (qc20 & 0x08) { // QC20 support
 		device_type3 = muic_i2c_read_byte(i2c, REG_DEVT3);
 		pr_info("%s:%s DEVICE_TYPE3 [0x%02x]\n",MUIC_DEV_NAME, __func__, device_type3);
-		if (device_type3 & 0x02){ // QC20_TA    
+		if (device_type3 & 0x02){ // QC20_TA
+			if (device_type3 & DEV_TYPE3_AFC_TA) {
+				muic_dpreset_afc();
+				return 0;
+			}
+
 			if ( (vbus_status == 3) ||(vbus_status == 4) ||(vbus_status == 5) ) {
 				pmuic->is_afc_device = 1;
 				afc_vbus_retry_count = 0;
@@ -1368,11 +1387,20 @@ static int sm5705_afc_init_check(struct regmap_desc *pdesc)
 	if ((pmuic->intr.intr3 & SM5705_AFC_TA_ATTACHED) ||
 				(pmuic->vps.s.val1 == SM5705_DT1_DCP)) {
 #if defined(CONFIG_MUIC_SUPPORT_CCIC) && !defined(CONFIG_SEC_FACTORY)
-		if (pmuic->is_ccic_attach)
-			afcops->afc_ta_attach(pmuic->regmapdesc);
+		/* To prevent damage by RP0 Cable, AFC should be progress after ccic_attach */
+		if (pmuic->is_ccic_attach) {
+			if (pmuic->ccic_rp == Rp_56K)
+				afcops->afc_ta_attach(pmuic->regmapdesc);
+			else {
+				pmuic->retry_afc = true;
+				pr_info("%s: Rp isn't 56K, but is (%d)K\n", __func__, pmuic->ccic_rp);
+				pmuic->attached_dev = ATTACHED_DEV_AFC_CHARGER_5V_MUIC;
+				muic_notifier_attach_attached_dev(pmuic->attached_dev);
+			}
+		}
 		else {
 			pmuic->retry_afc = true;
-			pr_info("%s: Need AFC restart for late ccic_attach\n", __func__);
+			pr_info("%s: Need to restart AFC for late ccic_attach\n", __func__);
 		}
 #else
 		afcops->afc_ta_attach(pmuic->regmapdesc);

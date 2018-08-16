@@ -69,6 +69,9 @@
 #include <linux/clk.h>
 #endif
 
+// [ SEC_SELINUX_PORTING_QUALCOMM
+#include <linux/proc_avc.h>
+// ] SEC_SELINUX_PORTING_QUALCOMM
 
 #include <linux/vmalloc.h>
 #include <asm/cacheflush.h>
@@ -1323,6 +1326,13 @@ device_initcall(sec_debug_reset_reason_init);
 int __init sec_debug_init(void)
 {
 	int ret;
+
+// [ SEC_SELINUX_PORTING_QUALCOMM
+#ifdef CONFIG_PROC_AVC
+	sec_avc_log_init();
+#endif
+// ] SEC_SELINUX_PORTING_QUALCOMM
+
 #ifdef CONFIG_USER_RESET_DEBUG
 	sec_debug_get_extra_info_region();
 #endif
