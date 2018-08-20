@@ -1226,6 +1226,11 @@ int mdss_mdp_cmd_ctx_stop(struct mdss_mdp_ctl *ctl,
 				ctx->pp_num);
 			ctx->rdptr_enabled = 0;
 			atomic_set(&ctx->koff_cnt, 0);
+			MDSS_XLOG(ctl->num, atomic_read(&ctx->koff_cnt), ctx->rdptr_enabled);
+			if( mdss_mdp_cmd_do_notifier(ctx)) {
+				mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_TIMEOUT);
+				MDSS_XLOG(0x9999, ctx->rdptr_enabled, atomic_read(&ctx->koff_cnt));
+			}
 		}
 	}
 
@@ -1354,6 +1359,8 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 	pr_debug("%s: transition from %d --> %d\n", __func__,
 		ctx->panel_power_state, panel_power_state);
 
+	MDSS_XLOG(0x1111, ctx->panel_power_state, panel_power_state);
+
 	if (sctl)
 		sctx = (struct mdss_mdp_cmd_ctx *) sctl->intf_ctx[MASTER_CTX];
 
@@ -1377,8 +1384,19 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 		 * mode.
 		 */
 		send_panel_events = true;
-		if (mdss_panel_is_power_on_ulp(panel_power_state))
+		if (mdss_panel_is_power_on_ulp(panel_power_state)) {
 			turn_off_clocks = true;
+		} else if (atomic_read(&ctx->koff_cnt)) {
+			MDSS_XLOG(0x2222, ctx->panel_power_state, panel_power_state);
+                       /*
+                        * Transition from interactive to low power
+                        * Wait for kickoffs to finish
+                        */
+                       MDSS_XLOG(ctl->num, atomic_read(&ctx->koff_cnt));
+                       mdss_mdp_cmd_wait4pingpong(ctl, NULL);
+                       if (sctl)
+                               mdss_mdp_cmd_wait4pingpong(sctl, NULL);
+                 }
 	} else {
 		/* Transitions between low power and ultra low power */
 		if (mdss_panel_is_power_on_ulp(panel_power_state)) {
@@ -1415,6 +1433,7 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 		send_panel_events = false;
 
 	pr_debug("%s: turn off interface clocks\n", __func__);
+	MDSS_XLOG(0x3333, ctx->panel_power_state, panel_power_state);
 	ret = mdss_mdp_cmd_stop_sub(ctl, panel_power_state);
 	if (IS_ERR_VALUE(ret)) {
 		pr_err("%s: unable to stop interface: %d\n",

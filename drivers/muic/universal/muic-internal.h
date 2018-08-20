@@ -195,6 +195,10 @@ typedef struct _muic_data_t {
 	/* Operation Mode */
 	enum muic_op_mode	opmode;
 	bool 			afc_water_disable;
+	/* Add Muic structure's member variable for VZW requirement(Rp0 Cable) */
+	//bool	is_ccic_attach;
+	int	ccic_rp;
+
 #endif
 
 #ifdef CONFIG_MUIC_SM5705_AFC_18W_TA_SUPPORT

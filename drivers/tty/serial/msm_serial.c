@@ -976,7 +976,6 @@ static struct console msm_console = {
 	.index = -1,
 	.data = &msm_uart_driver,
 };
-MODULE_DEVICE_TABLE(of, msm_match_table);
 
 #define MSM_CONSOLE	&msm_console
 

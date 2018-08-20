@@ -319,6 +319,32 @@ static void p61_access_unlock(struct pn547_dev *pn547_dev)
     mutex_unlock(&pn547_dev->p61_state_mutex);
     pr_info("%s: Exit\n", __func__);
 }
+
+static void set_nfc_pid(unsigned long arg)
+{
+	pid_t pid = arg;
+	struct task_struct *task;
+
+	pn547_dev->nfc_service_pid = arg;
+
+	if (arg == 0)
+		goto done;
+
+	task = pid_task(find_vpid(pid), PIDTYPE_PID);
+	if (task) {
+		pr_info("task->comm: %s\n", task->comm);
+		if (!strncmp(task->comm, "com.android.nfc", 15)) {
+			pn547_dev->nfc_service_pid = arg;
+			goto done;
+		} else {
+			pr_info("it's not nfc pid : %ld, %s\n", pn547_dev->nfc_service_pid, task->comm);
+		}
+	}
+
+	pn547_dev->nfc_service_pid = 0;
+done:
+	pr_info("The NFC Service PID is %ld\n", pn547_dev->nfc_service_pid);
+}
 #endif
 static int signal_handler(p61_access_state_t state, long nfc_pid)
 {
@@ -805,7 +831,7 @@ long pn547_dev_ioctl(struct file *filp,
 	case P547_SET_NFC_SERVICE_PID:
     {
         pr_info("%s : The NFC Service PID is %ld\n", __func__, arg);
-        pn547_dev->nfc_service_pid = arg;
+	set_nfc_pid(arg);
     }
     break;
 	
@@ -1100,6 +1126,11 @@ static int pn547_probe(struct i2c_client *client,
 	int addr=0x2B, addrcnt;
 	char tmp[4] = {0x20, 0x00, 0x01, 0x01};
 
+#if !defined(CONFIG_SEC_FACTORY) && defined(CONFIG_ESE_SECURE) && !defined(ENABLE_ESE_SPI_SECURED)
+	/* should not be here! */
+	pr_err("%s: [error] ese support but not secured? check!!\n", __func__);
+	return -ENODEV;
+#endif
 	if (client->dev.of_node) {
 		platform_data = devm_kzalloc(&client->dev,
 			sizeof(struct pn547_i2c_platform_data), GFP_KERNEL);

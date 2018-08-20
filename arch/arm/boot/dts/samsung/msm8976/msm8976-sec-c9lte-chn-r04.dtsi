@@ -1120,6 +1120,7 @@
 	pinctrl-1 = <&sdc1_clk_off &sdc1_cmd_off &sdc1_data_off &sdc1_rclk_off>;
 
 	qcom,nonremovable;
+	qcom,wakeup-on-idle;
 
 	status = "ok";
 };

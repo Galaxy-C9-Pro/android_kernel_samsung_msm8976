@@ -2430,7 +2430,8 @@ int mdss_mdp_ctl_reconfig(struct mdss_mdp_ctl *ctl,
 {
 	void *tmp;
 	int ret = 0;
-
+	
+	MDSS_XLOG(ctl->opmode, 0x1111);
 	/*
 	 * Switch first to prevent deleting important data in the case
 	 * where panel type is not supported in reconfig
@@ -2474,6 +2475,7 @@ int mdss_mdp_ctl_reconfig(struct mdss_mdp_ctl *ctl,
 	ctl->play_cnt = 0;
 
 	ctl->opmode |= (ctl->intf_num << 4);
+	MDSS_XLOG(ctl->opmode, 0x2222);
 
 skip_intf_reconfig:
 	ctl->width = get_panel_xres(&pdata->panel_info);
@@ -2516,7 +2518,8 @@ struct mdss_mdp_ctl *mdss_mdp_ctl_init(struct mdss_panel_data *pdata,
 	ctl->border_x_off = pinfo->lcdc.border_left;
 	ctl->border_y_off = pinfo->lcdc.border_top;
 	ctl->disable_prefill = false;
-
+	
+	MDSS_XLOG(pdata->panel_info.type, 0x1111);
 	switch (pdata->panel_info.type) {
 	case EDP_PANEL:
 		ctl->is_video_mode = true;
@@ -2602,8 +2605,10 @@ struct mdss_mdp_ctl *mdss_mdp_ctl_init(struct mdss_panel_data *pdata,
 	}
 
 	return ctl;
+	MDSS_XLOG(ctl->opmode, 0x2222);
 ctl_init_fail:
 	mdss_mdp_ctl_free(ctl);
+	MDSS_XLOG(ctl->opmode, 0x3333);
 
 	return ERR_PTR(ret);
 }
@@ -2917,7 +2922,8 @@ int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl, bool handoff)
 		pr_debug("%d: panel already on!\n", __LINE__);
 		return 0;
 	}
-
+	
+	MDSS_XLOG(0x1111);
 	if (mdss_mdp_ctl_is_power_off(ctl)) {
 		ret = mdss_mdp_ctl_setup(ctl);
 		if (ret)
@@ -2975,6 +2981,7 @@ int mdss_mdp_ctl_start(struct mdss_mdp_ctl *ctl, bool handoff)
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 	mutex_unlock(&ctl->lock);
+	MDSS_XLOG(0x2222);
 
 	return ret;
 }
@@ -2988,6 +2995,7 @@ int mdss_mdp_ctl_stop(struct mdss_mdp_ctl *ctl, int power_state)
 
 	pr_debug("ctl_num=%d, power_state=%d\n", ctl->num, ctl->power_state);
 
+	MDSS_XLOG(0x1111);
 	if (!mdss_mdp_ctl_is_power_on(ctl)) {
 		pr_debug("%s %d already off!\n", __func__, __LINE__);
 		return 0;
@@ -3030,6 +3038,7 @@ int mdss_mdp_ctl_stop(struct mdss_mdp_ctl *ctl, int power_state)
 		mdss_mdp_ctl_split_display_enable(0, ctl, sctl);
 
 	mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_TOP, 0);
+	MDSS_XLOG(MDSS_MDP_REG_CTL_TOP, 0);
 	if (sctl)
 		mdss_mdp_ctl_write(sctl, MDSS_MDP_REG_CTL_TOP, 0);
 
@@ -3054,7 +3063,8 @@ end:
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF);
 
 	mutex_unlock(&ctl->lock);
-
+	
+	MDSS_XLOG(0x2222);
 	return ret;
 }
 
@@ -4125,6 +4135,7 @@ int mdss_mdp_display_commit(struct mdss_mdp_ctl *ctl, void *arg,
 		mdss_mdp_mixer_setup(ctl, MDSS_MDP_MIXER_MUX_RIGHT);
 
 		mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_TOP, ctl->opmode);
+		MDSS_XLOG(MDSS_MDP_REG_CTL_TOP, ctl->opmode);
 		ctl->flush_bits |= BIT(17);	/* CTL */
 
 		if (sctl) {
@@ -4267,6 +4278,7 @@ int mdss_mdp_display_commit(struct mdss_mdp_ctl *ctl, void *arg,
 			}
 
 			mdss_mdp_ctl_write(ctl, MDSS_MDP_REG_CTL_TOP, opmode);
+			MDSS_XLOG(MDSS_MDP_REG_CTL_TOP, opmode);
 
 			mdss_mdp_ctl_pp_split_display_enable(pp_split, ctl);
 		} else {
@@ -4327,6 +4339,7 @@ done:
 
 	mutex_unlock(&ctl->lock);
 
+	MDSS_XLOG(ctl->play_cnt, 0x2222);
 	return ret;
 }
 

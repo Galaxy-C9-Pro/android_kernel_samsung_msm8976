@@ -65,7 +65,6 @@ struct snd_timer_user {
 	int qtail;
 	int qused;
 	int queue_size;
-	bool disconnected;
 	struct snd_timer_read *queue;
 	struct snd_timer_tread *tqueue;
 	spinlock_t qlock;
@@ -290,24 +289,10 @@ int snd_timer_open(struct snd_timer_instance **ti,
 		mutex_unlock(&register_mutex);
 		return -ENOMEM;
 	}
-	/* take a card refcount for safe disconnection */
-	if (timer->card)
-		get_device(timer->card->card_dev);
 	timeri->slave_class = tid->dev_sclass;
 	timeri->slave_id = slave_id;
-
-	if (list_empty(&timer->open_list_head) && timer->hw.open) {
-		int err = timer->hw.open(timer);
-		if (err) {
-			kfree(timeri->owner);
-			kfree(timeri);
-
-			module_put(timer->module);
-			mutex_unlock(&register_mutex);
-			return err;
-		}
-	}
-
+	if (list_empty(&timer->open_list_head) && timer->hw.open)
+		timer->hw.open(timer);
 	list_add_tail(&timeri->open_list, &timer->open_list_head);
 	snd_timer_check_master(timeri);
 	mutex_unlock(&register_mutex);
@@ -371,9 +356,6 @@ int snd_timer_close(struct snd_timer_instance *timeri)
 		}
 		spin_unlock(&timer->lock);
 		spin_unlock_irq(&slave_active_lock);
-		/* release a card refcount for safe disconnection */
-		if (timer->card)
-			put_device(timer->card->card_dev);
 		mutex_unlock(&register_mutex);
 	}
  out:
@@ -507,6 +489,7 @@ static int snd_timer_start_slave(struct snd_timer_instance *timeri,
 	return 1; /* delayed start */
 }
 
+
 /* stop/pause a master timer */
 static int snd_timer_stop1(struct snd_timer_instance *timeri, bool stop)
 {
@@ -546,7 +529,7 @@ static int snd_timer_stop1(struct snd_timer_instance *timeri, bool stop)
 	timeri->flags &= ~(SNDRV_TIMER_IFLG_RUNNING | SNDRV_TIMER_IFLG_START);
 	snd_timer_notify1(timeri, stop ? SNDRV_TIMER_EVENT_STOP :
 			  SNDRV_TIMER_EVENT_CONTINUE);
- unlock:
+unlock:
 	spin_unlock_irqrestore(&timer->lock, flags);
 	return result;
 }
@@ -667,9 +650,6 @@ static void snd_timer_tasklet(unsigned long arg)
 	unsigned long resolution, ticks;
 	unsigned long flags;
 
-	if (timer->card && timer->card->shutdown)
-		return;
-
 	spin_lock_irqsave(&timer->lock, flags);
 	/* now process all callbacks */
 	while (!list_empty(&timer->sack_list_head)) {
@@ -710,9 +690,6 @@ void snd_timer_interrupt(struct snd_timer * timer, unsigned long ticks_left)
 	if (timer == NULL)
 		return;
 
-	if (timer->card && timer->card->shutdown)
-		return;
-
 	spin_lock_irqsave(&timer->lock, flags);
 
 	/* remember the current resolution */
@@ -742,8 +719,8 @@ void snd_timer_interrupt(struct snd_timer * timer, unsigned long ticks_left)
 			ti->cticks = ti->ticks;
 		} else {
 			ti->flags &= ~SNDRV_TIMER_IFLG_RUNNING;
-			--timer->running;
-			list_del_init(&ti->active_list);
+			if (--timer->running)
+				list_del_init(&ti->active_list);
 		}
 		if ((timer->hw.flags & SNDRV_TIMER_HW_TASKLET) ||
 		    (ti->flags & SNDRV_TIMER_IFLG_FAST))
@@ -833,7 +810,6 @@ int snd_timer_new(struct snd_card *card, char *id, struct snd_timer_id *tid,
 	timer->tmr_subdevice = tid->subdevice;
 	if (id)
 		strlcpy(timer->id, id, sizeof(timer->id));
-	timer->sticks = 1;
 	INIT_LIST_HEAD(&timer->device_list);
 	INIT_LIST_HEAD(&timer->open_list_head);
 	INIT_LIST_HEAD(&timer->active_list_head);
@@ -926,28 +902,11 @@ static int snd_timer_dev_register(struct snd_device *dev)
 	return 0;
 }
 
-/* just for reference in snd_timer_dev_disconnect() below */
-static void snd_timer_user_ccallback(struct snd_timer_instance *timeri,
-				     int event, struct timespec *tstamp,
-				     unsigned long resolution);
-
 static int snd_timer_dev_disconnect(struct snd_device *device)
 {
 	struct snd_timer *timer = device->device_data;
-	struct snd_timer_instance *ti;
-
 	mutex_lock(&register_mutex);
 	list_del_init(&timer->device_list);
-	/* wake up pending sleepers */
-	list_for_each_entry(ti, &timer->open_list_head, open_list) {
-		/* FIXME: better to have a ti.disconnect() op */
-		if (ti->ccallback == snd_timer_user_ccallback) {
-			struct snd_timer_user *tu = ti->callback_data;
-
-			tu->disconnected = true;
-			wake_up(&tu->qchange_sleep);
-		}
-	}
 	mutex_unlock(&register_mutex);
 	return 0;
 }
@@ -958,8 +917,6 @@ void snd_timer_notify(struct snd_timer *timer, int event, struct timespec *tstam
 	unsigned long resolution = 0;
 	struct snd_timer_instance *ti, *ts;
 
-	if (timer->card && timer->card->shutdown)
-		return;
 	if (! (timer->hw.flags & SNDRV_TIMER_HW_SLAVE))
 		return;
 	if (snd_BUG_ON(event < SNDRV_TIMER_EVENT_MSTART ||
@@ -1048,8 +1005,8 @@ static int snd_timer_s_start(struct snd_timer * timer)
 		njiff += timer->sticks - priv->correction;
 		priv->correction = 0;
 	}
-	priv->last_expires = njiff;
-	mod_timer(&priv->tlist, njiff);
+	priv->last_expires = priv->tlist.expires = njiff;
+	add_timer(&priv->tlist);
 	return 0;
 }
 
@@ -1120,8 +1077,6 @@ static void snd_timer_proc_read(struct snd_info_entry *entry,
 
 	mutex_lock(&register_mutex);
 	list_for_each_entry(timer, &snd_timer_list, device_list) {
-		if (timer->card && timer->card->shutdown)
-			continue;
 		switch (timer->tmr_class) {
 		case SNDRV_TIMER_CLASS_GLOBAL:
 			snd_iprintf(buffer, "G%i: ", timer->tmr_device);
@@ -1246,6 +1201,7 @@ static void snd_timer_user_ccallback(struct snd_timer_instance *timeri,
 		tu->tstamp = *tstamp;
 	if ((tu->filter & (1 << event)) == 0 || !tu->tread)
 		return;
+	memset(&r1, 0, sizeof(r1));
 	r1.event = event;
 	r1.tstamp = *tstamp;
 	r1.val = resolution;
@@ -1280,6 +1236,7 @@ static void snd_timer_user_tinterrupt(struct snd_timer_instance *timeri,
 	}
 	if ((tu->filter & (1 << SNDRV_TIMER_EVENT_RESOLUTION)) &&
 	    tu->last_resolution != resolution) {
+		memset(&r1, 0, sizeof(r1));
 		r1.event = SNDRV_TIMER_EVENT_RESOLUTION;
 		r1.tstamp = tstamp;
 		r1.val = resolution;
@@ -1684,21 +1641,9 @@ static int snd_timer_user_params(struct file *file,
 		return -EBADFD;
 	if (copy_from_user(&params, _params, sizeof(params)))
 		return -EFAULT;
-	if (!(t->hw.flags & SNDRV_TIMER_HW_SLAVE)) {
-		u64 resolution;
-
-		if (params.ticks < 1) {
-			err = -EINVAL;
-			goto _end;
-		}
-
-		/* Don't allow resolution less than 1ms */
-		resolution = snd_timer_resolution(tu->timeri);
-		resolution *= params.ticks;
-		if (resolution < 1000000) {
-			err = -EINVAL;
-			goto _end;
-		}
+	if (!(t->hw.flags & SNDRV_TIMER_HW_SLAVE) && params.ticks < 1) {
+		err = -EINVAL;
+		goto _end;
 	}
 	if (params.queue_size > 0 &&
 	    (params.queue_size < 32 || params.queue_size > 1024)) {
@@ -1758,6 +1703,7 @@ static int snd_timer_user_params(struct file *file,
 	if (tu->timeri->flags & SNDRV_TIMER_IFLG_EARLY_EVENT) {
 		if (tu->tread) {
 			struct snd_timer_tread tread;
+			memset(&tread, 0, sizeof(tread));
 			tread.event = SNDRV_TIMER_EVENT_EARLY;
 			tread.tstamp.tv_sec = 0;
 			tread.tstamp.tv_nsec = 0;
@@ -1960,10 +1906,6 @@ static ssize_t snd_timer_user_read(struct file *file, char __user *buffer,
 
 			remove_wait_queue(&tu->qchange_sleep, &wait);
 
-			if (tu->disconnected) {
-				err = -ENODEV;
-				break;
-			}
 			if (signal_pending(current)) {
 				err = -ERESTARTSYS;
 				break;
@@ -1974,23 +1916,19 @@ static ssize_t snd_timer_user_read(struct file *file, char __user *buffer,
 		if (err < 0)
 			goto _error;
 
-		mutex_lock(&tu->ioctl_lock);
 		if (tu->tread) {
 			if (copy_to_user(buffer, &tu->tqueue[tu->qhead++],
 					 sizeof(struct snd_timer_tread))) {
-				mutex_unlock(&tu->ioctl_lock);
 				err = -EFAULT;
 				goto _error;
 			}
 		} else {
 			if (copy_to_user(buffer, &tu->queue[tu->qhead++],
 					 sizeof(struct snd_timer_read))) {
-				mutex_unlock(&tu->ioctl_lock);
 				err = -EFAULT;
 				goto _error;
 			}
 		}
-		mutex_unlock(&tu->ioctl_lock);
 
 		tu->qhead %= tu->queue_size;
 
@@ -2017,8 +1955,6 @@ static unsigned int snd_timer_user_poll(struct file *file, poll_table * wait)
 	mask = 0;
 	if (tu->qused)
 		mask |= POLLIN | POLLRDNORM;
-	if (tu->disconnected)
-		mask |= POLLERR;
 
 	return mask;
 }

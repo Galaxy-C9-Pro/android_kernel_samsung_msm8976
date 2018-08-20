@@ -615,9 +615,6 @@ limEncryptAuthFrame(tpAniSirGlobal pMac, tANI_U8 keyId, tANI_U8 *pKey, tANI_U8 *
 {
     tANI_U8  seed[LIM_SEED_LENGTH], icv[SIR_MAC_WEP_ICV_LENGTH];
     tANI_U16 frame_len;
- 
-    frame_len = ((tpSirMacAuthFrameBody)pPlainText)->length +
-         SIR_MAC_AUTH_FRAME_INFO_LEN + SIR_MAC_CHALLENGE_ID_LEN;
 
     frame_len = ((tpSirMacAuthFrameBody)pPlainText)->length +
 		 SIR_MAC_AUTH_FRAME_INFO_LEN + SIR_MAC_CHALLENGE_ID_LEN;

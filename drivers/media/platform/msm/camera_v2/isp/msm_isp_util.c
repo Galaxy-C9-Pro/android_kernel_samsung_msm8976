@@ -1980,7 +1980,8 @@ static void msm_isp_process_overflow_irq(
 		/*Update overflow state*/
 		*irq_status0 = 0;
 		*irq_status1 = 0;
-
+		
+		memset(&error_event, 0, sizeof(error_event));
 		error_event.frame_id =
 			vfe_dev->axi_data.src_info[VFE_PIX_0].frame_id;
 		error_event.u.error_info.err_type = ISP_ERROR_BUS_OVERFLOW;

@@ -421,6 +421,8 @@ static int __flush_iotlb_va(struct iommu_domain *domain, unsigned long va)
 		if (ret)
 			goto fail;
 
+//		SET_TLBIVA(iommu_drvdata->cb_base, ctx_drvdata->num,
+//				ctx_drvdata->asid | (va & CB_TLBIVA_VA));
 #ifdef CONFIG_IOMMU_AARCH64
 		va &= CB_TLBIVA_VA;
 		va >>= 12;

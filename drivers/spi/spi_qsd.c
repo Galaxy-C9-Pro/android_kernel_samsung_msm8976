@@ -46,6 +46,9 @@
 #include "spi_qsd.h"
 
 #define SPI_MAX_BYTES_PER_WORD			(4)
+#ifdef CONFIG_SEC_FACTORY
+#undef CONFIG_ESE_SECURE
+#endif
 
 static int msm_spi_pm_resume_runtime(struct device *device);
 static int msm_spi_pm_suspend_runtime(struct device *device);
@@ -3161,6 +3164,14 @@ skip_dma_resources:
 		dev_err(&pdev->dev, "failed to create dev. attrs : %d\n", rc);
 		goto err_attrs;
 	}
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (pdev->id == CONFIG_SENSORS_FP_SPI_NUMBER)
+		return 0;
+#endif
+#ifdef CONFIG_ESE_SECURE
+	if (pdev->id == CONFIG_ESE_SECURE_SPI_PORT)
+		return 0;
+#endif
 	spi_debugfs_init(dd);
 
 	return 0;

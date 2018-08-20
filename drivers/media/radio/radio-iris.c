@@ -53,7 +53,7 @@ static unsigned char c_byt_pair_index;
 static char utf_8_flag;
 static char rt_ert_flag;
 static char formatting_dir;
-static unsigned char sig_blend = CTRL_ON;
+static unsigned char sig_blend = CTRL_OFF;
 static DEFINE_MUTEX(iris_fm);
 
 module_param(rds_buf, uint, 0);

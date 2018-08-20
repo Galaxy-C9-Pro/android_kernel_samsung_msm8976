@@ -2084,6 +2084,11 @@ int msm_isp_axi_halt(struct vfe_device *vfe_dev,
 {
 	int rc = 0;
 
+	if (!vfe_dev->vfe_base) { 
+		pr_err("dbg_isp: vfe_base is null. skip halt"); 
+		return rc; 
+	} 
+	
 	if (halt_cmd->overflow_detected) {
 		/*Store current IRQ mask*/
 		if (vfe_dev->error_info.overflow_recover_irq_mask0 == 0) {

@@ -34,6 +34,7 @@
 #include <linux/of_gpio.h>
 #endif
 
+#include <linux/ccic/s2mm005.h>
 #include <linux/muic/muic.h>
 #if defined(CONFIG_MUIC_NOTIFIER)
 #include <linux/muic/muic_notifier.h>
@@ -276,6 +277,8 @@ static void mdev_handle_ccic_detach(muic_data_t *pmuic)
 	pdesc->ccic_evt_dcdcnt = 0;
 	pdesc->ccic_evt_attached = MUIC_CCIC_NOTI_UNDEFINED;
 
+	pmuic->pdata->afc_limit_voltage = false;
+	pmuic->ccic_rp = 0;
 	pmuic->legacy_dev = 0;
 	pmuic->attached_dev = 0;
 	pmuic->is_ccic_attach = false;
@@ -499,8 +502,8 @@ static int muic_handle_ccic_ATTACH(muic_data_t *pmuic, CC_NOTI_ATTACH_TYPEDEF *p
 	struct vendor_ops *pvendor = pmuic->regmapdesc->vendorops;
 	int prev_status = pdesc->ccic_evt_attached;
 
-	pr_info("%s: src:%d dest:%d id:%d attach:%d cable_type:%d rprd:%d\n", __func__,
-		pnoti->src, pnoti->dest, pnoti->id, pnoti->attach, pnoti->cable_type, pnoti->rprd);
+	pr_info("%s: src:%d dest:%d id:%d attach:%d cable_type:%d rprd:%d retry_afc:%d\n", __func__,
+		pnoti->src, pnoti->dest, pnoti->id, pnoti->attach, pnoti->cable_type, pnoti->rprd, pmuic->retry_afc);
 
 	pdesc->ccic_evt_attached = pnoti->attach ? 
 		MUIC_CCIC_NOTI_ATTACH : MUIC_CCIC_NOTI_DETACH;
@@ -534,27 +537,52 @@ static int muic_handle_ccic_ATTACH(muic_data_t *pmuic, CC_NOTI_ATTACH_TYPEDEF *p
 		else
 			pr_info("%s: No VBUS-> doing nothing.\n", __func__);
 
+		pmuic->ccic_rp = pnoti->cable_type;
+
 		/* To prevent damage by RP0 Cable, AFC should be progress after ccic_attach */
 		pmuic->is_ccic_attach = true;
 
 		/* W/A for late ccic attach */
-#if defined(CONFIG_MUIC_UNIVERSAL_SM5705_AFC)		
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5705_AFC)
 		if (pmuic->retry_afc) {
 			pmuic->retry_afc = false;
-			pr_info("%s: Do AFC restart because of late ccic_attach.\n", __func__);
-			muic_restart_afc();
+			pr_info("%s: Retry to AFC because of ccic_attach, RP info = %d.\n", __func__, pmuic->ccic_rp);
+
+			switch(pmuic->ccic_rp) {
+				case Rp_56K:
+					muic_restart_afc();
+					break;
+				case Rp_Abnormal:
+					pr_info("%s:%s Working SBU-Vbus Short W/A\n", MUIC_DEV_NAME, __func__);
+					pmuic->pdata->afc_limit_voltage = true;
+					pmuic->legacy_dev = pmuic->attached_dev = ATTACHED_DEV_NONE_MUIC;
+					muic_notifier_detach_attached_dev(pmuic->attached_dev);
+					muic_dpreset_afc();
+					msleep(500);
+					pmuic->legacy_dev = pmuic->attached_dev = ATTACHED_DEV_TA_MUIC;
+					muic_notifier_attach_attached_dev(pmuic->attached_dev);
+					break;
+				default:
+					break;
+			}
+			return 0;
 		}
-#endif		
+#endif
+
 		/* CCIC ATTACH means NO WATER */
 		if (pmuic->afc_water_disable) {
 			pr_info("%s: Water is not detected, AFC Enable\n", __func__);
 			pmuic->afc_water_disable = false;
+			pmuic->pdata->afc_limit_voltage = false;
 		}
 
 		/* W/A for Incomplete insertion case */
 		pdesc->ccic_evt_dcdcnt = 0;
 		if (prev_status != MUIC_CCIC_NOTI_ATTACH &&
 				pmuic->is_dcdtmr_intr && vbus) {
+#if defined(CONFIG_MUIC_UNIVERSAL_SM5705_AFC)
+//			cable_redetection(pmuic);
+#else
 			if (pmuic->vps_table == VPS_TYPE_TABLE) {
 				if (pmuic->vps.t.chgdetrun) {
 					pr_info("%s: Incomplete insertion. Chgdet runnung\n", __func__);
@@ -565,6 +593,7 @@ static int muic_handle_ccic_ATTACH(muic_data_t *pmuic, CC_NOTI_ATTACH_TYPEDEF *p
 			pmuic->is_dcdtmr_intr = false;
 			if (pvendor && pvendor->run_chgdet)
 				pvendor->run_chgdet(pmuic->regmapdesc, 1);
+#endif
 		}
 	} else {
 		if (pnoti->rprd) {
@@ -698,6 +727,7 @@ static int muic_handle_ccic_WATER(muic_data_t *pmuic, CC_NOTI_ATTACH_TYPEDEF *pn
 	if (pnoti->attach == CCIC_NOTIFY_ATTACH) {
 		pr_info("%s: Water detect\n", __func__);
 		pmuic->afc_water_disable = true;
+		muic_afc_set_voltage(AFC_5V);
 	} else {
 		pr_info("%s: Undefined notification, Discard\n", __func__);
 	}

@@ -59,16 +59,58 @@ static ssize_t light_data_show(struct device *dev,
 		data->buf[SENSOR_TYPE_LIGHT].a_time, data->buf[SENSOR_TYPE_LIGHT].a_gain);
 }
 
+static ssize_t light_coef_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	int iRet, iReties = 0;
+	struct ssp_msg *msg;
+	int coef_buf[7];
+
+	memset(coef_buf,0,sizeof(int)*7);
+retries:
+	msg = kzalloc(sizeof(*msg), GFP_KERNEL);
+	if (msg == NULL) {
+		pr_err("[SSP]: %s - failed to allocate memory\n", __func__);
+		return FAIL;
+	}
+	msg->cmd = MSG2SSP_AP_GET_LIGHT_COEF;
+	msg->length = 28;
+	msg->options = AP2HUB_READ;
+	msg->buffer = (u8*)coef_buf;
+	msg->free_buffer = 0;
+
+	iRet = ssp_spi_sync(data, msg, 1000);
+	if (iRet != SUCCESS) {
+		pr_err("[SSP] %s fail %d\n", __func__, iRet);
+
+		if (iReties++ < 2) {
+			pr_err("[SSP] %s fail, retry\n", __func__);
+			mdelay(5);
+			goto retries;
+		}
+		return FAIL;
+	}
+
+	pr_info("[SSP] %s - %d %d %d %d %d %d %d\n",__func__,
+		coef_buf[0],coef_buf[1],coef_buf[2],coef_buf[3],coef_buf[4],coef_buf[5],coef_buf[6]);
+	
+	return snprintf(buf, PAGE_SIZE, "%d,%d,%d,%d,%d,%d,%d\n", 
+		coef_buf[0],coef_buf[1],coef_buf[2],coef_buf[3],coef_buf[4],coef_buf[5],coef_buf[6]);
+}
+
 static DEVICE_ATTR(vendor, S_IRUGO, light_vendor_show, NULL);
 static DEVICE_ATTR(name, S_IRUGO, light_name_show, NULL);
 static DEVICE_ATTR(lux, S_IRUGO, light_lux_show, NULL);
 static DEVICE_ATTR(raw_data, S_IRUGO, light_data_show, NULL);
+static DEVICE_ATTR(coef, S_IRUGO, light_coef_show, NULL);
 
 static struct device_attribute *light_attrs[] = {
 	&dev_attr_vendor,
 	&dev_attr_name,
 	&dev_attr_lux,
 	&dev_attr_raw_data,
+	&dev_attr_coef,
 	NULL,
 };
 

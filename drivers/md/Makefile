@@ -1,6 +1,13 @@
 #
 # Makefile for the kernel software RAID and LVM drivers.
 #
+ifeq ($(SEC_BUILD_CONF_PERF_DMVERITY),true)
+EXTRA_CFLAGS += -DVERITY_PERF=true
+endif
+ifeq ($(SEC_BUILD_CONF_DMV_ALTA),true)
+EXTRA_CFLAGS += -DDMV_ALTA=true
+EXTRA_CFLAGS += -DDMV_ALTA_PROF=true
+endif
 ifeq ($(SEC_BUILD_CONF_QUICK_DMVERITY),true)
 EXTRA_CFLAGS += -DVERIFY_META_ONLY=true
 endif

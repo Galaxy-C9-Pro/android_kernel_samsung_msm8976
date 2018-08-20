@@ -51,10 +51,10 @@
  * Length of descriptive name associated with Interrupt
  */
 #define TZBSP_MAX_INT_DESC 16
-
-#ifdef CONFIG_TIMA_GET_QSEE_LOGS_USING_RDX
-extern void set_qsee_log_address(unsigned int address);
-#endif
+/*
+ * TZ 3.X version info
+ */
+#define QSEE_VERSION_TZ_3_X 0x800000
 /*
  * VMID Table
  */
@@ -622,11 +622,6 @@ static void tzdbg_register_qsee_log_buf(void)
 		__func__, resp.result);
 		goto err2;
 	}
-
-#ifdef CONFIG_TIMA_GET_QSEE_LOGS_USING_RDX
-	/* QSEE Logs */
-	set_qsee_log_address((uint32_t)pa);
-#endif
 
 	g_qsee_log =
 		(struct tzdbg_log_t *)ion_map_kernel(g_ion_clnt, g_ihandle);

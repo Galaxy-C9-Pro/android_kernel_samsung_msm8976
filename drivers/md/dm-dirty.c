@@ -110,7 +110,7 @@ static void dirty_finish_io(struct dm_dirty_io *io, struct bio *bio, int error)
 
 	mempool_free(io, v->io_mempool);
 
-	bio_endio(bio, error);
+	bio_endio_nodec(bio, error);
 }
 
 static void dirty_hash(struct bio *bio, int error)

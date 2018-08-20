@@ -8,12 +8,14 @@
 #include <linux/highmem.h>
 #include <linux/io.h>
 #include <linux/types.h>
+#include <linux/slab.h>
 
 #define DEBUG_LOG_START (0x85B00000)
 
 #define	DEBUG_LOG_SIZE	(1<<20)
 #define	DEBUG_LOG_MAGIC	(0xaabbccdd)
 #define	DEBUG_LOG_ENTRY_SIZE	128
+
 typedef struct debug_log_entry_s
 {
     uint32_t	timestamp;          /* timestamp at which log entry was made*/
@@ -41,17 +43,25 @@ void set_qsee_log_address(unsigned int address);
 
 ssize_t	tima_read(struct file *filep, char __user *buf, size_t size, loff_t *offset)
 {
+    char *localbuf = NULL;
 	/* First check is to get rid of integer overflow exploits */
 	if (size > DEBUG_LOG_SIZE || (*offset) + size > DEBUG_LOG_SIZE) {
 		printk(KERN_ERR"Extra read\n");
 		return -EINVAL;
 	}
 
-	if (copy_to_user(buf, (const char *)tima_debug_log_addr + (*offset), size)) {
+    localbuf = kzalloc(size, GFP_KERNEL);
+    if(localbuf == NULL)
+        return -ENOMEM;
+
+	memcpy_fromio(localbuf, (const char *)tima_debug_log_addr + (*offset), size);
+	if (copy_to_user(buf, localbuf, size)) {
 		printk(KERN_ERR"Copy to user failed\n");
+		kfree(localbuf);
 		return -1;
 	} else {
 		*offset += size;
+		kfree(localbuf);
 		return size;
 	}
 }
@@ -67,12 +77,11 @@ static const struct file_operations tima_proc_fops = {
  */
 static int __init tima_debug_log_read_init(void)
 {
-        if (proc_create("tima_debug_log", 0644,NULL, &tima_proc_fops) == NULL) {
+	if (proc_create("tima_debug_log", 0644,NULL, &tima_proc_fops) == NULL) {
 		printk(KERN_ERR"tima_debug_log_read_init: Error creating proc entry\n");
 		goto error_return;
 	}
-        printk(KERN_INFO"tima_debug_log_read_init: Registering /proc/tima_debug_log Interface \n");
-
+    printk(KERN_INFO"tima_debug_log_read_init: Registering /proc/tima_debug_log Interface \n");
 	tima_debug_log_addr = (unsigned long *)ioremap(DEBUG_LOG_START, DEBUG_LOG_SIZE);
 	if (tima_debug_log_addr == NULL) {
 		printk(KERN_ERR"tima_debug_log_read_init: ioremap Failed\n");

@@ -262,6 +262,38 @@ int com_to_usb_cp(muic_data_t *pmuic)
 	return ret;
 }
 
+int cable_redetection(muic_data_t *pmuic)
+{
+	switch (do_BCD_rescan(pmuic)) {
+		case CHGTYPE_NONE:
+			pmuic->legacy_dev = ATTACHED_DEV_UNDEFINED_CHARGING_MUIC;
+			com_to_open_with_vbus(pmuic);
+			break;
+		case CHGTYPE_DCP:
+		case CHGTYPE_U200:
+		case CHGTYPE_LO_TA:
+			pmuic->legacy_dev = ATTACHED_DEV_TA_MUIC;
+			com_to_open_with_vbus(pmuic);
+			break;
+		case CHGTYPE_CDP:
+			pmuic->legacy_dev = ATTACHED_DEV_CDP_MUIC;
+			break;
+		case CHGTYPE_SDP:
+			pmuic->legacy_dev = ATTACHED_DEV_USB_MUIC;
+			break;
+		case CHGTYPE_TIMEOUT_SDP:
+			pmuic->legacy_dev = ATTACHED_DEV_TIMEOUT_OPEN_MUIC;
+			break;
+		default:
+			pr_info("%s: Unsupported Chger Type\n", __func__);
+		return 0;
+		}
+
+	muic_notifier_attach_attached_dev(pmuic->legacy_dev);
+	
+	return 0;
+}
+
 static int set_rustproof_mode(struct regmap_desc *pdesc, int op)
 {
 	struct vendor_ops *pvendor = pdesc->vendorops;
